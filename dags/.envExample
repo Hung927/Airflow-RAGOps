@@ -1,0 +1,9 @@
+# ollama
+OLLAMA_HOST=<ollama_server_ipv4>:<ollama_server_port>
+
+# qdrant
+QDRANT_URL="http://<qdrant_container_ipv4>:6333"
+
+# airflow
+# echo -e "AIRFLOW_UID=$(id -u)" > .env
+AIRFLOW_UID=$(id -u)
