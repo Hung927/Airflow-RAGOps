@@ -2,29 +2,9 @@ import os
 import json
 import logging
 from typing import Dict
-# from transformers import AutoTokenizer
 
-# tokenizer = AutoTokenizer.from_pretrained("deepset/bert-base-cased-squad2", cache_dir="dags/.cache")
 
-# _tokenizer = None
 _pdf_converter = None
-
-# def get_tokenizer():
-#     """
-#     Get the tokenizer for the BERT model.
-    
-#     Returns:
-#         tokenizer: The tokenizer for the BERT model.
-#     """
-#     global _tokenizer
-#     if _tokenizer is None:
-#         from transformers import AutoTokenizer
-#         logging.info("Loading tokenizer deepset/bert-base-cased-squad2...")
-#         _tokenizer = AutoTokenizer.from_pretrained("deepset/bert-base-cased-squad2", cache_dir="dags/.cache")
-#         logging.info("Tokenizer loaded.")    
-    
-#     return _tokenizer
-
 
 def get_pdf_converter():
     """
@@ -44,45 +24,52 @@ def get_pdf_converter():
         
 
 class Data_Processing:
-    def __init__(self):
+    def __init__(
+        self, 
+        config_path: str = "dags/config.json", 
+        data_context_path: str = "dags/data/data_context.json"
+    ):
+        """
+        Initialize the Data_Processing class.
+        
+        Args:
+            config_path: Path to the config file
+            data_context_path: Path to the data context file
+        """
+        self.config_path = config_path
+        self.data_context_path = data_context_path
         try:
-            self.config_data = json.load(open("dags/config.json", "r"))
-            self.data_context = json.load(open("dags/data/data_context.json", "r"))
+            self.config_data = json.load(open(self.config_path, "r"))
+            self.data_context = json.load(open(self.data_context_path, "r"))
             self.uploaded_files = self.config_data.get("uploaded_files", [])
             self.file_list = self.config_data.get("file_list", [])
         except Exception as e:
-            print(f"Error loading config or data context: {e}")
+            logging.error(f"Error loading config or data context: {e}")
             self.config_data = {}
             self.data_context = {}
             self.uploaded_files = []
             self.file_list = []
 
     @staticmethod
-    def extract_qa_pairs(raw_data: Dict[str, str]) -> Dict[str, str]:
+    def extract_squad_document(raw_data: Dict[str, str]) -> list:
         """
-        Extract question-answer pairs from SQuAD formatted data.
+        Extract document from SQuAD formatted data.
         
         Args:
             raw_data: SQuAD formatted data dictionary
             
-        Returns:
-            qa_dict: Dictionary containing question-answer pairs in the format {question: answer}
-        """
+        Return:
+            squad_document: List of documents extracted from the SQuAD formatted data
+        """        
+        squad_document = []   
+        for item in raw_data['data']:
+            for paragraph in item['paragraphs']:
+                try:
+                    squad_document.append(paragraph['context'])
+                except KeyError:
+                    logging.error("Warning: 'context' not found in paragraph.")
         
-        qa_dict = {}    
-        
-        # Iterate through the SQuAD data
-        for article in raw_data["data"]:
-            for paragraph in article["paragraphs"]:
-                for qa in paragraph["qas"]:
-                    question = qa["question"]
-                    
-                    if not qa["is_impossible"]:
-                        if qa["answers"]:
-                            answer = qa["answers"][0]["text"]
-                            qa_dict[question] = answer
-        
-        return qa_dict
+        return list(set(squad_document))
 
     @staticmethod
     def pdf_to_text(file_path: str) -> str:
@@ -103,81 +90,113 @@ class Data_Processing:
         
             return text
         except Exception as e:
-            print(f"Error converting PDF to text: {e}")
-            return ""            
-
+            logging.error(f"Error converting PDF to text: {e}")
+            return ""
+    
+    @staticmethod    
+    def markdown_text_splitter(context: str) -> list:
+        """
+        Split the text into smaller chunks based on Markdown headers.
+        
+        Args:
+            context: Context to be split
+            
+        Returns:
+            context_list: List of text chunks
+        """
+        from langchain_text_splitters import MarkdownHeaderTextSplitter
+        
+        context_list = []
+        text_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=[
+                ("#", "Header 1"),
+                ("##", "Header 2"),
+                ("###", "Header 3")
+            ],
+            strip_headers=False
+        )
+        splits = text_splitter.split_text(context)
+        
+        for text in splits:
+            context_list.append(text.page_content)
+        
+        return context_list
+    
+    def save_file(self, file: str, file_path: str, document: list) -> None:
+        with open(file_path, "w", encoding="utf-8") as f:
+            if file == "squad.json":
+                self.data_context[file] = document
+                json.dump(self.data_context, f, ensure_ascii=False, indent=4)
+                logging.info(f"Extracted {len(document)} documents from SQuAD dataset.")
+            elif file.endswith(".pdf"):
+                self.data_context[file] = document
+                json.dump(self.data_context, f, ensure_ascii=False, indent=4)
+                logging.info(f"Extracted {len(document)} documents from {file}.")
 
     def data_processing(self) -> str:
         """
-        Process the raw data and extract question-answer pairs.
+        Process the uploaded files and extract data from them.
         
         Returns:
             str: Success message if processing is completed successfully.
         """
         try:
             files = [item for item in self.uploaded_files if item not in self.file_list]
-            print(f"Files to process: {files}")
             logging.info(f"Files to process: {files}")
             
             for file in files:
                 success = False
-                print(f"Processing file: {file}")
                 logging.info(f"Processing file: {file}")
                 
                 if file == "squad.json":
                     
                     # Load SQuAD dataset
                     raw_data = json.load(open("dags/data/squad.json", "r"))
-                    qa_pairs = self.extract_qa_pairs(raw_data)
-                    self.data_context[file] = qa_pairs
+                    squad_document = self.extract_squad_document(raw_data)
                     
-                    if qa_pairs:
+                    if squad_document:
                         success = True
+                        self.save_file(file, self.data_context_path, squad_document[:10])
                         with open("dags/data/data_context.json", "w", encoding="utf-8") as f:
+                            self.data_context[file] = squad_document[:10]
                             json.dump(self.data_context, f, ensure_ascii=False, indent=4)
-                            print(f"Extracted {len(qa_pairs)} question-answer pairs from SQuAD dataset.")
-                            logging.info(f"Extracted {len(qa_pairs)} question-answer pairs from SQuAD dataset.")
+                            logging.info(f"Extracted {len(squad_document)} documents from SQuAD dataset.")
                 
                 elif file.endswith(".pdf"):
                     
                     file_path = f"dags/data/pdf/{file}"     
                     if os.path.isfile(file_path) == False:
-                        print(f"File not found: {file_path}")
+                        logging.error(f"File not found: {file_path}")
                         continue
                     
-                    # Convert PDF to text                                
+                    # Convert PDF to text and split into chunks                          
                     context = self.pdf_to_text(file_path)
-                    print(f"Extracted text from {file}: {context[:100]}...")  # Print first 100 characters
+                    context_list = self.markdown_text_splitter(context)
                     
-                    if context:
+                    if context_list:
                         success = True
                         with open("dags/data/data_context.json", "w", encoding="utf-8") as f:
-                            self.data_context[file] = {
-                                "context": context
-                            }
+                            self.data_context[file] = context_list
                             json.dump(self.data_context, f, ensure_ascii=False, indent=4)
+                            logging.info(f"Extracted {len(context_list)} documents from {file}.")
                 
                 if success:      
                     # Update the config file
-                    print(f"Successfully processed {file}")     
+                    logging.info(f"Successfully processed {file}")     
                     self.config_data["file_list"].append(file)
                     self.config_data["uploaded_files"].remove(file)
-                    with open("dags/config.json", "w", encoding="utf-8") as f:
-                        json.dump(self.config_data, f, ensure_ascii=False, indent=4)
+                    
+            with open("dags/config.json", "w", encoding="utf-8") as f:
+                json.dump(self.config_data, f, ensure_ascii=False, indent=4)
             
         except Exception as e:
-            print(f"Error processing data: {e}")
+            logging.error(f"Error processing data: {e}")
             return "Error processing data."
         finally:
-            print("Data processing completed.")
             logging.info("Data processing completed.")
         
         return "Data processing completed successfully."
 
-
-# if __name__ == "__main__":
-#     processor = Data_Processing()
-#     processor.data_processing()
 
 # Download SQuAD dataset
 # wget https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v2.0.json -O squad.json
