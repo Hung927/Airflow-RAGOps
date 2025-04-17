@@ -11,11 +11,11 @@ from langchain_core.output_parsers import StrOutputParser
 
 import utils.prompt_config as prompt_config
 
-def llm(user_question: str, model: str = "gemma2:9b", type: str = "rag", **kwargs) -> str:
+def llm(model: str = "gemma2:9b", type: str = "rag", **kwargs) -> str:
     """Create a LangChain LLM chain using the specified model.
     
     Args:
-        user_question (str): The user's question.
+        # user_question (str): The user's question.
         model (str): The model to be used. Defaults to "gemma2:9b".
         type (str): The type of the LLM chain. Defaults to "rag".
         **kwargs: Additional arguments.
@@ -23,7 +23,10 @@ def llm(user_question: str, model: str = "gemma2:9b", type: str = "rag", **kwarg
     Returns:
         llm_result (str): The result from the LLM chain.
     """
+    
     ti = kwargs['ti']
+    user_question = ti.xcom_pull(task_ids='random_question_task', key='return_value')
+    
     llm = ChatOllama(
         model=model,
         base_url=os.getenv("OLLAMA_URL"),

@@ -6,11 +6,11 @@ import ollama
 import logging
 from qdrant_client import QdrantClient, models
 
-def retrieval(user_question: str, embed_model: str = "imac/zpoint_large_embedding_zh", types: str = "similarity", **kwargs) -> list:
+def retrieval(embed_model: str = "imac/zpoint_large_embedding_zh", types: str = "similarity", **kwargs) -> list:
     """Retrieve relevant documents from Qdrant based on the user question.
     
     Args:
-        user_question (str): The user's question.
+        # user_question (str): The user's question.
         model (str): The model to be used for embeddings. Defaults to "gemma2:9b".
         type (str): The type of retrieval. Defaults to "similarity".
         **kwargs: Additional arguments.
@@ -19,11 +19,12 @@ def retrieval(user_question: str, embed_model: str = "imac/zpoint_large_embeddin
         search_result (list): A list of retrieved documents.
     """    
     
-    logging.info(f"Retrieving information for question: {user_question}")
     qdrant_client = QdrantClient(url=os.getenv("QDRANT_URL", "http://10.20.1.95:6333"))
     content = ""
     search_result = []
     ti = kwargs['ti']
+    user_question = ti.xcom_pull(task_ids='random_question_task', key='return_value')
+    logging.info(f"Retrieving information for question: {user_question}")
     
     if types == "similarity":
         logging.info(f"Using similarity search")
