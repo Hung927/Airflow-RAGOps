@@ -1,10 +1,8 @@
 import os
 from datetime import datetime
 from airflow.sensors.base import BaseSensorOperator
-from airflow.utils.decorators import apply_defaults
 
 class FileUpdateSensor(BaseSensorOperator):
-    @apply_defaults
     def __init__(self, filepath: str, last_modified_after: datetime, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.filepath = filepath
