@@ -3,5 +3,13 @@
     "file_list": [
         "squad.json",
         "paper.pdf"
-    ]
+    ],
+    "rag_pipeline_config": {
+        "use_similarity_retrieval": true,
+        "use_keyword_retrieval": true,
+        "use_rerank": false
+    },
+    "document_types": "squad",
+    "embed_model": "imac/zpoint_large_embedding_zh",
+    "llm_model": "gemma2:9b"
 }
