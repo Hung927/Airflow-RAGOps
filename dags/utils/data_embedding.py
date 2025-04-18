@@ -10,15 +10,21 @@ from qdrant_client import QdrantClient, models
 
 
 class Data_Embedding:
-    def __init__(self, data_context_path: str = "dags/data/data_context.json"):
+    def __init__(
+        self, 
+        embed_model: str = "imac/zpoint_large_embedding_zh",
+        data_context_path: str = "dags/data/data_context.json"):
         """
         Initialize the Data_Embedding class.
         
         Args:
+            embed_model: Model name for ollama
             data_context_path: Path to the data context file
         """
         self.data_context_path = data_context_path
         try:
+            self.embed_model = embed_model
+            self.data_context_path = data_context_path
             self.data_context = json.load(open(self.data_context_path, "r"))
             self.qdrant_client = QdrantClient(url=os.getenv("QDRANT_URL"))
         except Exception as e:
@@ -26,8 +32,7 @@ class Data_Embedding:
             self.data_context = {}
             self.qdrant_client = None
     
-    @staticmethod
-    def ollama_embedding(model: str, prompt: str, file_name: str = None) -> models.PointStruct:
+    def ollama_embedding(self, prompt: str, file_name: str = None) -> models.PointStruct:
         """
         Generate embedding using ollama.
         
@@ -40,7 +45,7 @@ class Data_Embedding:
         """
         try:
             vector = ollama.embeddings(
-                model=model,
+                model=self.embed_model,
                 prompt=prompt,
                 options={"device": "cpu"},
                 keep_alive="0s"
@@ -133,32 +138,39 @@ class Data_Embedding:
         Returns:
             str: Success message if processing is completed successfully.
         """
-        
-        files = [item for item in self.data_context.keys()]
-        logging.info(f"File to process: {files}")
-        
-        for file in files:
-            ollama_vector = []
-            logging.info(f"Processing file: {file}")
+        try:    
+            files = [item for item in self.data_context.keys()]
+            logging.info(f"File to process: {files}")
             
-            for document in self.data_context[file]:
-                ollama_vector.append(
-                    self.ollama_embedding(
-                        model="imac/zpoint_large_embedding_zh",
-                        prompt=document,
-                        file_name=file
-                ))
+            for file in files:
+                ollama_vector = []
+                logging.info(f"Processing file: {file}")
                 
-            if ollama_vector:
-                self.insert_documents(
-                    ollama_vector=ollama_vector,
-                    collection_name=f"{file.split('.')[0]}_"
-                )
-                self.data_context.pop(file)
+                for document in self.data_context[file]:
+                    ollama_vector.append(
+                        self.ollama_embedding(
+                            prompt=document,
+                            file_name=file
+                    ))
+                    
+                if ollama_vector:
+                    if file == "squad.json":
+                        collection_name = f"{file.split('.')[0]}_{self.embed_model.split('/')[-1]}"
+                    else:
+                        collection_name = f"{file.split('.')[-1]}_{self.embed_model.split('/')[-1]}"
+                        
+                    self.insert_documents(
+                        ollama_vector=ollama_vector,
+                        collection_name=collection_name
+                    )
+                    self.data_context.pop(file)
+            
+            with open(self.data_context_path, "w", encoding="utf-8") as f:
+                json.dump(self.data_context, f, ensure_ascii=False, indent=4)
+                    
+            return "Documents embedding and insertion completed successfully."
+        except Exception as e:
+            logging.error(f"Error processing data: {e}")
+            return "Error processing data."
         
-        with open("dags/data/data_context.json", "w", encoding="utf-8") as f:
-            json.dump(self.data_context, f, ensure_ascii=False, indent=4)
-                
-        
-        return "Documents embedding and insertion completed successfully."
             

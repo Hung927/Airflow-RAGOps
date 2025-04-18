@@ -4,26 +4,10 @@ import logging
 from typing import Dict
 
 
-_pdf_converter = None
-
-def get_pdf_converter():
-    """
-    Get the PDF converter.
-    
-    Returns:
-        pdf_converter: The PDF converter.
-    """
-    global _pdf_converter
-    if _pdf_converter is None:
-        from marker.converters.pdf import PdfConverter
-        from marker.models import create_model_dict
-        _pdf_converter = PdfConverter(
-            artifact_dict=create_model_dict(),
-        )
-    return _pdf_converter
-        
-
 class Data_Processing:
+    
+    _pdf_converter = None
+    
     def __init__(
         self, 
         config_path: str = "dags/config.json", 
@@ -70,9 +54,28 @@ class Data_Processing:
                     logging.error("Warning: 'context' not found in paragraph.")
         
         return list(set(squad_document))
-
+    
     @staticmethod
-    def pdf_to_text(file_path: str) -> str:
+    def get_pdf_converter():
+        """
+        Get the PDF converter.
+        
+        Returns:
+            pdf_converter: The PDF converter.
+        """
+        try:
+            if Data_Processing._pdf_converter is None:
+                from marker.converters.pdf import PdfConverter
+                from marker.models import create_model_dict
+                Data_Processing._pdf_converter = PdfConverter(
+                    artifact_dict=create_model_dict(),
+                )
+            return Data_Processing._pdf_converter
+        except Exception as e:
+            logging.error(f"Error loading PDF converter: {e}")
+            raise e
+
+    def pdf_to_text(self, file_path: str) -> str:
         """
         Convert PDF file to text using the PdfConverter.
         
@@ -84,7 +87,7 @@ class Data_Processing:
         """
         try:
             from marker.output import text_from_rendered
-            converter = get_pdf_converter()
+            converter = self.get_pdf_converter()
             rendered = converter(file_path)
             text, _, images = text_from_rendered(rendered)
         
@@ -104,34 +107,53 @@ class Data_Processing:
         Returns:
             context_list: List of text chunks
         """
-        from langchain_text_splitters import MarkdownHeaderTextSplitter
-        
-        context_list = []
-        text_splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=[
-                ("#", "Header 1"),
-                ("##", "Header 2"),
-                ("###", "Header 3")
-            ],
-            strip_headers=False
-        )
-        splits = text_splitter.split_text(context)
-        
-        for text in splits:
-            context_list.append(text.page_content)
-        
-        return context_list
+        try:
+            from langchain_text_splitters import MarkdownHeaderTextSplitter
+            
+            context_list = []
+            text_splitter = MarkdownHeaderTextSplitter(
+                headers_to_split_on=[
+                    ("#", "Header 1"),
+                    ("##", "Header 2"),
+                    ("###", "Header 3")
+                ],
+                strip_headers=False
+            )
+            splits = text_splitter.split_text(context)
+            
+            for text in splits:
+                context_list.append(text.page_content)
+            
+            return context_list
+        except Exception as e:
+            logging.error(f"Error splitting text: {e}")
+            return []
     
-    def save_file(self, file: str, file_path: str, document: list) -> None:
-        with open(file_path, "w", encoding="utf-8") as f:
-            if file == "squad.json":
-                self.data_context[file] = document
-                json.dump(self.data_context, f, ensure_ascii=False, indent=4)
-                logging.info(f"Extracted {len(document)} documents from SQuAD dataset.")
-            elif file.endswith(".pdf"):
-                self.data_context[file] = document
-                json.dump(self.data_context, f, ensure_ascii=False, indent=4)
-                logging.info(f"Extracted {len(document)} documents from {file}.")
+    def save_file(self, file: str, file_path: str, document: list = []) -> None:
+        """
+        Save the extracted document to a file.
+        
+        Args:
+            file: Name of the file
+            file_path: Path to the file
+            document: List of documents to be saved
+        """
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                if file == "squad.json":
+                    self.data_context[file] = document
+                    json.dump(self.data_context, f, ensure_ascii=False, indent=4)
+                    logging.info(f"Extracted {len(document)} documents from SQuAD dataset.")
+                elif file.endswith(".pdf"):
+                    self.data_context[file] = document
+                    json.dump(self.data_context, f, ensure_ascii=False, indent=4)
+                    logging.info(f"Extracted {len(document)} documents from {file}.")
+                elif file == "config":
+                    json.dump(self.config_data, f, ensure_ascii=False, indent=4)
+                    logging.info(f"Config file saved.")
+        except Exception as e:
+            logging.error(f"Error saving file {file}: {e}")
+            raise e
 
     def data_processing(self) -> str:
         """
@@ -157,10 +179,6 @@ class Data_Processing:
                     if squad_document:
                         success = True
                         self.save_file(file, self.data_context_path, squad_document[:10])
-                        with open("dags/data/data_context.json", "w", encoding="utf-8") as f:
-                            self.data_context[file] = squad_document[:10]
-                            json.dump(self.data_context, f, ensure_ascii=False, indent=4)
-                            logging.info(f"Extracted {len(squad_document)} documents from SQuAD dataset.")
                 
                 elif file.endswith(".pdf"):
                     
@@ -175,27 +193,23 @@ class Data_Processing:
                     
                     if context_list:
                         success = True
-                        with open("dags/data/data_context.json", "w", encoding="utf-8") as f:
-                            self.data_context[file] = context_list
-                            json.dump(self.data_context, f, ensure_ascii=False, indent=4)
-                            logging.info(f"Extracted {len(context_list)} documents from {file}.")
+                        self.save_file(file, self.data_context_path, context_list)
                 
                 if success:      
                     # Update the config file
                     logging.info(f"Successfully processed {file}")     
                     self.config_data["file_list"].append(file)
                     self.config_data["uploaded_files"].remove(file)
-                    
-            with open("dags/config.json", "w", encoding="utf-8") as f:
-                json.dump(self.config_data, f, ensure_ascii=False, indent=4)
             
+            self.save_file("config", self.config_path)            
+            return "Data processing completed successfully."            
         except Exception as e:
             logging.error(f"Error processing data: {e}")
             return "Error processing data."
         finally:
             logging.info("Data processing completed.")
+            return "Data processing completed."
         
-        return "Data processing completed successfully."
 
 
 # Download SQuAD dataset
