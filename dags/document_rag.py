@@ -1,14 +1,12 @@
 import os
 import sys
 import json
-import random
-# sys.path.append("/opt/airflow/dags")
 sys.path.append(os.getcwd())
 from airflow import DAG
 from airflow.sensors.filesystem import FileSensor
 from airflow.operators.python import PythonOperator
 from pendulum import duration
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from utils.data_processing import Data_Processing
 from utils.data_embedding import Data_Embedding
@@ -23,10 +21,12 @@ default_args = {
 }
 
 
-with DAG("Data_Preprocessing", default_args=default_args, schedule="@once", catchup=False) as dag:
+with DAG("Data_Indexing", default_args=default_args, schedule="@once", catchup=False) as dag:
     """Config file upload check and data processing pipeline DAG."""
     
     config_data = json.load(open("dags/config.json", "r"))
+    Data_Processing = Data_Processing()
+    Data_Embedding = Data_Embedding()
         
     uploaded_files_config_json_update_check_task = json_update_sensor.JsonUpdateSensor(
         task_id="uploaded_files_config_json_update_check_task",
@@ -39,7 +39,7 @@ with DAG("Data_Preprocessing", default_args=default_args, schedule="@once", catc
     
     data_processing_task = PythonOperator(
         task_id="data_processing_task",
-        python_callable=Data_Processing().data_processing
+        python_callable=Data_Processing.data_processing
     )
     
     file_list_config_json_update_check_task = json_update_sensor.JsonUpdateSensor(
@@ -53,7 +53,7 @@ with DAG("Data_Preprocessing", default_args=default_args, schedule="@once", catc
     
     data_embedding_task = PythonOperator(
         task_id="data_embedding_task",
-        python_callable=Data_Embedding().documents_embedding
+        python_callable=Data_Embedding.documents_embedding
     )
     
     
