@@ -5,6 +5,7 @@
         "paper.pdf"
     ],
     "rag_pipeline_config": {
+        "use_expert_retrieval": true,
         "use_similarity_retrieval": true,
         "use_keyword_retrieval": true,
         "use_rerank": false

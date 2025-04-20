@@ -5,13 +5,14 @@ import random
 import logging
 sys.path.append(os.getcwd())
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator
 from pendulum import duration
 from datetime import datetime, timedelta
 
 from utils.retrieval import Retrieval
 from utils.rerank import Reranker
 from utils.llm import LLM
+from utils.expert_branch import ExpertBranch
 
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
@@ -23,10 +24,12 @@ try:
 except (FileNotFoundError, json.JSONDecodeError) as e:
     logging.warning(f"Could not load or parse {CONFIG_PATH}. Using default RAG config. Error: {e}")
     rag_config = {
+        "use_expert_retrieval": False,
         "use_similarity_retrieval": False,
         "use_keyword_retrieval": False,
         "use_rerank": False
     }
+USE_EXPERT = rag_config.get("use_expert_retrieval", False)
 USE_SIMILARITY = rag_config.get("use_similarity_retrieval", False)
 USE_KEYWORD = rag_config.get("use_keyword_retrieval", False)
 if USE_SIMILARITY and USE_KEYWORD:
@@ -64,11 +67,42 @@ with DAG("RAG_Pipeline", default_args=default_args, schedule=timedelta(hours=12)
     Retrieval = Retrieval(embed_model=config_data.get("embed_model"))
     Reranker = Reranker()
     LLM = LLM(model=config_data.get("llm_model"))
+    ExpertBranch = ExpertBranch()
     
     random_question_task = PythonOperator(
         task_id="random_question_task",
         python_callable=get_user_question,
     )
+    
+    if USE_EXPERT:
+        logging.info("Using expert retrieval")
+        expert_retrieval_task = PythonOperator(
+            task_id="expert_retrieval_task",
+            python_callable=Retrieval.retrieval,
+            op_kwargs={
+                "types": "expert"
+            },
+        )        
+        expert_validate_task = PythonOperator(
+            task_id="expert_validate_task",
+            python_callable=LLM.llm,
+            op_kwargs={
+                "types": "validation"
+            },
+        )
+        expert_branch_task = BranchPythonOperator(
+            task_id="expert_branch_task",
+            python_callable=ExpertBranch.branch_logic,
+            op_kwargs={
+                "USE_SIMILARITY": USE_SIMILARITY,
+                "USE_KEYWORD": USE_KEYWORD
+            },
+        )        
+    else:
+        logging.info("Not using expert retrieval")
+        expert_retrieval_task = None
+        expert_validate_task = None
+        expert_branch_task = None
     
     if USE_SIMILARITY:
         logging.info("Using similarity retrieval")        
@@ -124,23 +158,26 @@ with DAG("RAG_Pipeline", default_args=default_args, schedule=timedelta(hours=12)
     )
         
     retrieval_tasks = []
+    temp_tasks = random_question_task
+    
+    if USE_EXPERT:
+        random_question_task >> expert_retrieval_task >> expert_validate_task >> expert_branch_task
+        temp_tasks = expert_branch_task  
 
     if USE_SIMILARITY:
-        random_question_task >> similarity_retrieval_task
+        temp_tasks >> similarity_retrieval_task
         retrieval_tasks.append(similarity_retrieval_task)
 
     if USE_KEYWORD:
-        random_question_task >> keyword_extract_task >> keyword_retrieval_task
+        temp_tasks >> keyword_extract_task >> keyword_retrieval_task
         retrieval_tasks.append(keyword_retrieval_task)
 
-    if USE_RERANK:
+    if USE_RERANK and retrieval_tasks:
         for task in retrieval_tasks:
             task >> rerank_task
         rerank_task >> llm_task
-    elif len(retrieval_tasks) > 0:
-        for task in retrieval_tasks:
-            task >> llm_task
-
-    if not retrieval_tasks:
-        random_question_task >> llm_task
+    elif len(retrieval_tasks) == 1:
+        retrieval_tasks[0] >> llm_task
+    else:
+        temp_tasks >> llm_task
         
