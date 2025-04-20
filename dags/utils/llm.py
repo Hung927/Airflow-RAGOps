@@ -77,7 +77,7 @@ class LLM:
             logging.error(f"Error getting LLM model: {e}")
             raise e
 
-    def get_context(self, ti) -> list:
+    def get_context(self, ti, types: str) -> list:
         """
         Get context from XCom.
         
@@ -88,16 +88,20 @@ class LLM:
             context (list): List of context retrieved from XCom.
         """
         try:
-            context = ti.xcom_pull(task_ids='rerank_task', key='return_value')
-            logging.info(f"Rerank task result: {context}")
+            if types == "validation":
+                context = ti.xcom_pull(task_ids='expert_retrieval_task', key='return_value')
+                logging.info(f"Expert retrieval task result: {context}")
+            else:    
+                context = ti.xcom_pull(task_ids='rerank_task', key='return_value')
+                logging.info(f"Rerank task result: {context}")
             
-            if not context:
-                context = ti.xcom_pull(task_ids='similarity_retrieval_task', key='return_value')
-                logging.info(f"Similarity context: {context}")
-                
                 if not context:
-                    context = ti.xcom_pull(task_ids='keyword_retrieval_task', key='return_value')
-                    logging.info(f"Keyword context: {context}")
+                    context = ti.xcom_pull(task_ids='similarity_retrieval_task', key='return_value')
+                    logging.info(f"Similarity context: {context}")
+                    
+                    if not context:
+                        context = ti.xcom_pull(task_ids='keyword_retrieval_task', key='return_value')
+                        logging.info(f"Keyword context: {context}")
             
             return context if isinstance(context, list) else []
         except Exception as e:
@@ -212,7 +216,7 @@ Response:"""
                 llm_result = self.generate_response_from_question(types, user_question, llm)
 
             else:
-                context = self.get_context(ti)
+                context = self.get_context(ti, types)
                 llm_result = self.generate_response_with_context(types, user_question, context, llm)
             
             logging.info(f"LLM result: /n{llm_result}")
@@ -221,93 +225,3 @@ Response:"""
         except Exception as e:
             logging.error(f"Error in LLM class: {e}")
             raise e
-
-
-# def llm(model: str = "gemma2:9b", types: str = "rag", **kwargs) -> str:
-#     """Create a LangChain LLM chain using the specified model.
-    
-#     Args:
-#         model (str): The model to be used. Defaults to "gemma2:9b".
-#         types (str): The types of the LLM chain. Defaults to "rag".
-#         **kwargs: Additional arguments.
-        
-#     Returns:
-#         llm_result (str): The result from the LLM chain.
-#     """
-    
-#     ti = kwargs['ti']
-#     user_question = ti.xcom_pull(task_ids='random_question_task', key='return_value')
-    
-#     llm = ChatOllama(
-#         model=model,
-#         base_url=os.getenv("OLLAMA_URL"),
-#         temperature=0.0,
-#         keep_alive="0s"
-#     )
-    
-#     if types == "keyword":
-#         logging.info(f"Using keyword extraction")
-#         PROMPT = prompt_config.Prompt_en().prompt.KEYWORD
-#         prompt_template = f"""{PROMPT}
-
-# The Question: {{user_question}}
-
-# Response:"""
-
-#         llm_chain = (
-#             {"user_question": RunnablePassthrough()}
-#             | ChatPromptTemplate.from_template(prompt_template)
-#             | llm
-#             | StrOutputParser()
-#         )
-        
-        
-#         llm_result = llm_chain.invoke({"user_question": user_question})
-#         llm_result = ast.literal_eval(f'[{llm_result}]')
-#         logging.info(f"user_question: {user_question}")
-#         logging.info(f"LLM result: /n{llm_result}")
-#         # ti.xcom_push(key=type, value=llm_result)
-
-#     else:
-        
-#         if types == "rag":
-#             logging.info(f"Using RAG")
-#             PROMPT = prompt_config.Prompt_en().prompt.RAG_DETAIL_SYS_PROMPT
-#         elif types == "validation":
-#             logging.info(f"Using validation")
-#             PROMPT = prompt_config.Prompt_en().prompt.VALIDATION
-#         elif types == "summary":
-#             logging.info(f"Using summary")
-#             PROMPT = prompt_config.Prompt_en().prompt.SUMMARY_1
-#         else:
-#             logging.info(f"Using general ask")
-#             PROMPT = prompt_config.Prompt_en().prompt.GENERAL_ASK_SYS_PROMPT
-            
-#         prompt_template = f"""{PROMPT}
-
-# Context: 
-# {{context}}
-
-# The Question: {{user_question}}
-
-# Response:"""
-
-#         llm_chain = (
-#             {"context": RunnablePassthrough(), "user_question": RunnablePassthrough()}
-#             | ChatPromptTemplate.from_template(prompt_template)
-#             | llm
-#             | StrOutputParser()
-#         )
-    
-#         context = ti.xcom_pull(task_ids='rerank_task', key='return_value')
-#         logging.info(f"Rerank task result: {context}") 
-#         if not context:
-#             context = ti.xcom_pull(task_ids='similarity_retrieval_task', key='return_value')
-#             logging.info(f"Context is None, using retrieval task result: {context}")
-            
-#         llm_result = llm_chain.invoke({"context": "".join(context), "user_question": user_question})
-#         logging.info(f"user_question: {user_question}")
-#         logging.info(f"Context: {context}")        
-#         logging.info(f"LLM result: /n{llm_result}")
-    
-#     return llm_result
