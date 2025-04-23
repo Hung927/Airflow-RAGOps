@@ -8,7 +8,8 @@
         "use_expert_retrieval": true,
         "use_similarity_retrieval": true,
         "use_keyword_retrieval": true,
-        "use_rerank": false
+        "use_rerank": true,
+        "use_ragas": false
     },
     "document_types": "squad",
     "embed_model": "imac/zpoint_large_embedding_zh",
