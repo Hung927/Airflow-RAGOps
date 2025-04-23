@@ -59,14 +59,14 @@ class Retrieval:
             logging.error(f"Error generating embedding: {e}")
             raise e  
         
-    def similarity_search(self, collection_name: str, prompt: str, limit: int = 10) -> list:
+    def similarity_search(self, collection_name: str, prompt: str, limit: int = 5) -> list:
         """
         Perform similarity search in Qdrant.
         
         Args:
             collection_name (str): Name of the Qdrant collection.
             prompt (str): Text prompt to generate embedding.
-            limit (int): Number of results to return. Defaults to 10.
+            limit (int): Number of results to return. Defaults to 5.
         
         Returns:
             result (list): List of search results.
@@ -86,7 +86,7 @@ class Retrieval:
             logging.error(f"Error during similarity search: {e}")
             raise e
 
-    def keyword_search(self, collection_name: str, prompt: str, keywords: list, limit: int = 10) -> list:
+    def keyword_search(self, collection_name: str, prompt: str, keywords: list, limit: int = 5) -> list:
         """
         Perform keyword search in Qdrant.
         
@@ -94,7 +94,7 @@ class Retrieval:
             collection_name (str): Name of the Qdrant collection.
             prompt (str): Text prompt to generate embedding.
             keywords (list): List of keywords to search for.
-            limit (int): Number of results to return. Defaults to 10.
+            limit (int): Number of results to return. Defaults to 5.
         
         Returns:
             result (list): List of search results.
@@ -159,7 +159,7 @@ class Retrieval:
                 )
             elif types == "keyword":
                 logging.info(f"Using keyword search")
-                keyword_list = ti.xcom_pull(task_ids='keyword_extract_task', key='return_value')
+                keyword_list = ti.xcom_pull(task_ids='keyword_extraction_task', key='return_value')
                 keyword_list = ast.literal_eval(f'[{keyword_list}]')
                 logging.info(f"Keyword list: {keyword_list}")
                 

@@ -78,14 +78,14 @@ class Reranker:
             
         return Reranker._reranker
     
-    def rerank_context(self, user_question: str, context: list, top_k: int = 10) -> list:
+    def rerank_context(self, user_question: str, context: list, top_k: int = 5) -> list:
         """
         Rerank the context based on the user question using a reranker model.
         
         Args:
             user_question (str): The user's question.
             context (list): List of context to be reranked.
-            top_k (int): Number of top results to return. Defaults to 10.
+            top_k (int): Number of top results to return. Defaults to 5.
             
         Returns:
             sorted_result (list): A list of sorted context based on relevance to the user question.

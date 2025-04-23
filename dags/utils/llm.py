@@ -92,7 +92,7 @@ class LLM:
                 context = ti.xcom_pull(task_ids='expert_retrieval_task', key='return_value')
                 logging.info(f"Expert retrieval task result: {context}")
             else:    
-                context = ti.xcom_pull(task_ids='rerank_task', key='return_value')
+                context = ti.xcom_pull(task_ids='reranking_task', key='return_value')
                 logging.info(f"Rerank task result: {context}")
             
                 if not context:
