@@ -21,15 +21,15 @@ default_args = {
 }
 
 
-with DAG("Data_Indexing", default_args=default_args, schedule="@once", catchup=False) as dag:
+with DAG("Indexing_DAG", default_args=default_args, schedule="@once", catchup=False) as dag:
     """Config file upload check and data processing pipeline DAG."""
     
     config_data = json.load(open("dags/config.json", "r"))
     Data_Processing = Data_Processing()
     Data_Embedding = Data_Embedding()
         
-    uploaded_files_config_json_update_check_task = json_update_sensor.JsonUpdateSensor(
-        task_id="uploaded_files_config_json_update_check_task",
+    uploaded_files_check_task = json_update_sensor.JsonUpdateSensor(
+        task_id="uploaded_files_check_task",
         filepath="dags/config.json",
         key="uploaded_files",
         expected_value=config_data["uploaded_files"],
@@ -42,8 +42,8 @@ with DAG("Data_Indexing", default_args=default_args, schedule="@once", catchup=F
         python_callable=Data_Processing.data_processing
     )
     
-    file_list_config_json_update_check_task = json_update_sensor.JsonUpdateSensor(
-        task_id="file_list_config_json_update_check_task",
+    file_list_update_check_task = json_update_sensor.JsonUpdateSensor(
+        task_id="file_list_update_check_task",
         filepath="dags/config.json",
         key="file_list",
         expected_value=config_data["file_list"],
@@ -57,5 +57,5 @@ with DAG("Data_Indexing", default_args=default_args, schedule="@once", catchup=F
     )
     
     
-    uploaded_files_config_json_update_check_task >> data_processing_task
-    file_list_config_json_update_check_task >> data_embedding_task
+    uploaded_files_check_task >> data_processing_task
+    file_list_update_check_task >> data_embedding_task

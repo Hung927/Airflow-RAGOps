@@ -13,6 +13,7 @@ from utils.retrieval import Retrieval
 from utils.rerank import Reranker
 from utils.llm import LLM
 from utils.expert_branch import ExpertBranch
+from utils.ragas import Ragas
 
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
@@ -27,18 +28,20 @@ except (FileNotFoundError, json.JSONDecodeError) as e:
         "use_expert_retrieval": False,
         "use_similarity_retrieval": False,
         "use_keyword_retrieval": False,
-        "use_rerank": False
+        "use_rerank": False,
+        "use_ragas": False
     }
 USE_EXPERT = rag_config.get("use_expert_retrieval", False)
 USE_SIMILARITY = rag_config.get("use_similarity_retrieval", False)
 USE_KEYWORD = rag_config.get("use_keyword_retrieval", False)
+USE_RAGAS = rag_config.get("use_ragas", False)
 if USE_SIMILARITY and USE_KEYWORD:
     USE_RERANK = True
 elif (USE_SIMILARITY or USE_KEYWORD):
     USE_RERANK = rag_config.get("use_rerank", False)
 else:
     USE_RERANK = False
-logging.info(f"RAG pipeline config: USE_SIMILARITY={USE_SIMILARITY}, USE_KEYWORD={USE_KEYWORD}, USE_RERANK={USE_RERANK}")    
+logging.info(f"RAG pipeline config: USE_EXPERT={USE_EXPERT}, USE_SIMILARITY={USE_SIMILARITY}, USE_KEYWORD={USE_KEYWORD}, USE_RERANK={USE_RERANK}, USE_RAGAS={USE_RAGAS}")    
     
 default_args = {
   "owner": "HUNG",
@@ -60,14 +63,16 @@ def get_user_question():
         user_question = "What is the current number of electors currently in a Scottish Parliament constituency? "
     
     return user_question
+    # return "Where did the Normans and Byzantines sign the peace treaty?"
 
-with DAG("RAG_Pipeline", default_args=default_args, schedule=timedelta(hours=12), catchup=False) as dag:
+with DAG("Query_DAG", default_args=default_args, schedule=timedelta(hours=12), catchup=False) as dag:
     """RAG pipeline DAG for retrieval-augmented generation (RAG) using Ollama and Qdrant."""
     
     Retrieval = Retrieval(embed_model=config_data.get("embed_model"))
     Reranker = Reranker()
     LLM = LLM(model=config_data.get("llm_model"))
     ExpertBranch = ExpertBranch()
+    Ragas = Ragas()
     
     random_question_task = PythonOperator(
         task_id="random_question_task",
@@ -83,15 +88,15 @@ with DAG("RAG_Pipeline", default_args=default_args, schedule=timedelta(hours=12)
                 "types": "expert"
             },
         )        
-        expert_validate_task = PythonOperator(
-            task_id="expert_validate_task",
+        expert_validation_task = PythonOperator(
+            task_id="expert_validation_task",
             python_callable=LLM.llm,
             op_kwargs={
                 "types": "validation"
             },
         )
-        expert_branch_task = BranchPythonOperator(
-            task_id="expert_branch_task",
+        expert_branching_task = BranchPythonOperator(
+            task_id="expert_branching_task",
             python_callable=ExpertBranch.branch_logic,
             op_kwargs={
                 "USE_SIMILARITY": USE_SIMILARITY,
@@ -101,8 +106,8 @@ with DAG("RAG_Pipeline", default_args=default_args, schedule=timedelta(hours=12)
     else:
         logging.info("Not using expert retrieval")
         expert_retrieval_task = None
-        expert_validate_task = None
-        expert_branch_task = None
+        expert_validation_task = None
+        expert_branching_task = None
     
     if USE_SIMILARITY:
         logging.info("Using similarity retrieval")        
@@ -120,8 +125,8 @@ with DAG("RAG_Pipeline", default_args=default_args, schedule=timedelta(hours=12)
     
     if USE_KEYWORD:
         logging.info("Using keyword retrieval")
-        keyword_extract_task = PythonOperator(
-            task_id="keyword_extract_task",
+        keyword_extraction_task = PythonOperator(
+            task_id="keyword_extraction_task",
             python_callable=LLM.llm,
             op_kwargs={
                 "types": "keyword"
@@ -137,18 +142,18 @@ with DAG("RAG_Pipeline", default_args=default_args, schedule=timedelta(hours=12)
         )
     else:
         logging.info("Not using keyword retrieval")
-        keyword_extract_task = None
+        keyword_extraction_task = None
         keyword_retrieval_task = None
     
     if USE_RERANK:
         logging.info("Using rerank")
-        rerank_task = PythonOperator(
-            task_id="rerank_task",
+        reranking_task = PythonOperator(
+            task_id="reranking_task",
             python_callable=Reranker.rerank,
         )
     else:
         logging.info("Not using rerank")
-        rerank_task = None
+        reranking_task = None
     
     llm_task_op_kwargs = {"types": "rag"} if (similarity_retrieval_task or keyword_retrieval_task) else {"types": "general"}
     llm_task = PythonOperator(
@@ -156,28 +161,42 @@ with DAG("RAG_Pipeline", default_args=default_args, schedule=timedelta(hours=12)
         python_callable=LLM.llm,
         op_kwargs=llm_task_op_kwargs,
     )
+    
+    if USE_RAGAS:
+        ragas_evaluation_task = PythonOperator(
+            task_id="ragas_evaluation_task",
+            python_callable=Ragas.ragas,
+            op_kwargs={
+                "USE_EXPERT": USE_EXPERT,
+                "USE_SIMILARITY": USE_SIMILARITY,
+                "USE_KEYWORD": USE_KEYWORD,
+                "USE_RERANK": USE_RERANK
+            },
+        )
         
     retrieval_tasks = []
     temp_tasks = random_question_task
     
     if USE_EXPERT:
-        random_question_task >> expert_retrieval_task >> expert_validate_task >> expert_branch_task
-        temp_tasks = expert_branch_task  
+        random_question_task >> expert_retrieval_task >> expert_validation_task >> expert_branching_task
+        temp_tasks = expert_branching_task  
 
     if USE_SIMILARITY:
         temp_tasks >> similarity_retrieval_task
         retrieval_tasks.append(similarity_retrieval_task)
 
     if USE_KEYWORD:
-        temp_tasks >> keyword_extract_task >> keyword_retrieval_task
+        temp_tasks >> keyword_extraction_task >> keyword_retrieval_task
         retrieval_tasks.append(keyword_retrieval_task)
 
     if USE_RERANK and retrieval_tasks:
         for task in retrieval_tasks:
-            task >> rerank_task
-        rerank_task >> llm_task
+            task >> reranking_task
+        reranking_task >> llm_task
     elif len(retrieval_tasks) == 1:
         retrieval_tasks[0] >> llm_task
     else:
         temp_tasks >> llm_task
-        
+    
+    if USE_RAGAS and any(retrieval_tasks):
+        llm_task >> ragas_evaluation_task     
